@@ -1,62 +1,77 @@
 /*
  * SENTIRIC CORTEX ENGINE
  * ----------------------
- * CORE LOOP v1.0
+ * CORE LOOP v1.1 - The Senses
  */
+
+mod audio; // Audio modülünü içeri aktar
 
 use std::time::{Instant, Duration};
 use std::thread;
+use crate::audio::Ear;
 
-/// Motorun durumunu temsil eder.
 struct EngineState {
     is_running: bool,
     ticks: u64,
 }
 
 fn main() {
+    println!("-------------------------------------------");
+    println!("SENTIRIC CORTEX ENGINE: BOOT SEQUENCE");
+    println!("-------------------------------------------");
+
     let mut state = EngineState {
         is_running: true,
         ticks: 0,
     };
 
-    println!("-------------------------------------------");
-    println!("SENTIRIC CORTEX ENGINE: INITIALIZED");
-    println!("PHILOSOPHY: ZERO-COPY / BARE-METAL");
-    println!("-------------------------------------------");
+    // 1. DONANIM BAŞLATMA (Ear Modülü)
+    // Hata olursa motoru durdurma, sadece raporla (Fault Tolerance)
+    let ear = match Ear::new() {
+        Ok(e) => Some(e),
+        Err(e) => {
+            eprintln!("[CRITICAL] İşitme modülü başlatılamadı: {}", e);
+            None
+        }
+    };
 
     let engine_start = Instant::now();
+    println!("[SYSTEM] Motor döngüsü (Heartbeat) başladı...");
 
-    // ANA MOTOR DÖNGÜSÜ (THE HEARTBEAT)
+    // ANA MOTOR DÖNGÜSÜ
     while state.is_running {
-        let frame_start = Instant::now();
         state.ticks += 1;
+        
+        // --- 1. SENSE (İşitme) ---
+        if let Some(ref active_ear) = ear {
+            // Mikrofondan veri geldi mi?
+            // Döngü çok hızlı olduğu için her tick'te veri gelmeyebilir.
+            if let Some(packet) = active_ear.listen() {
+                // Sadece görselleştirme amaçlı: Gelen sesin şiddetini (RMS) ölç
+                let rms: f32 = (packet.samples.iter().map(|x| x * x).sum::<f32>() / packet.samples.len() as f32).sqrt();
+                
+                // Eğer ses belli bir eşiğin üzerindeyse log bas (Silence Detection)
+                if rms > 0.01 { 
+                    println!("[SENSE] Ses Algılandı | Şiddet: {:.4} | Buffer: {} samples", rms, packet.samples.len());
+                }
+            }
+        }
 
-        // 1. SENSE (İşitme/Algılama)
-        // [Gelecek Kod: Audio Buffer Processing]
+        // --- 2. THINK ---
+        // (Henüz boş)
 
-        // 2. THINK (Bilişsel İşleme)
-        // [Gelecek Kod: Cognitive Pipeline]
+        // --- 3. ACT ---
+        // (Henüz boş)
 
-        // 3. ACT (Konuşma/Eylem)
-        // [Gelecek Kod: Synthesis/Output]
-
-        // Simüle edilmiş iş yükü (1000hz döngü hedefi)
-        if state.ticks % 1000 == 0 {
+        // İstatistik Raporu (Her 5 saniyede bir)
+        if state.ticks % 5000 == 0 { // 1ms sleep ile yaklaşık 5 saniye
             let uptime = engine_start.elapsed().as_secs();
-            println!(
-                "[SYSTEM] Uptime: {}s | Total Ticks: {} | Frame Latency: {:.2?}",
-                uptime, state.ticks, frame_start.elapsed()
-            );
+            println!("[HEARTBEAT] Uptime: {}s | Ticks: {}", uptime, state.ticks);
         }
 
-        // CPU'yu korumak için mikro uyku (Üretimde donanım interrupt'ı beklenecek)
+        // CPU Koruma (1ms uyku = ~1000 FPS)
         thread::sleep(Duration::from_millis(1));
-
-        // Güvenli çıkış (Simülasyon için 10 saniye sonra durur)
-        if engine_start.elapsed().as_secs() > 10 {
-            state.is_running = false;
-        }
     }
 
-    println!("SENTIRIC CORTEX ENGINE: GRACEFUL SHUTDOWN");
+    println!("SENTIRIC CORTEX ENGINE: SHUTDOWN");
 }
