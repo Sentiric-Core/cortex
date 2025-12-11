@@ -1,43 +1,46 @@
-name: Build and Release Cortex
+name: Publish Release
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    tags:
+      - 'v*' # Sadece v1.0, v2.3 gibi taglerde çalışır
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-linux:
-    name: Build Linux (Ubuntu)
+  release-linux:
+    name: Release Linux Binary
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Release oluşturmak için yazma izni gerekli
 
     steps:
-    # 1. Kodları Çek (v4'e güncellendi)
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    # 2. Sistem Bağımlılıklarını Kur (Linux için ses ve derleme araçları)
-    - name: Install System Dependencies
+    - name: Install Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y libasound2-dev libclang-dev cmake pkg-config build-essential
 
-    # 3. Rust Kurulumu (Modern 'dtolnay' action'ı kullanıldı)
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
 
-    # 4. Derleme İşlemi
-    - name: Build Cortex (Release)
+    - name: Build Release
       run: cargo build --release --verbose
 
-    # 5. Dosyayı Yükle (v4'e güncellendi - KRİTİK DÜZELTME)
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
+    # Binary dosyasını sıkıştır (Zip)
+    - name: Package Binary
+      run: |
+        cd target/release
+        tar -czvf sentiric-cortex-linux-x64.tar.gz cortex
+        mv sentiric-cortex-linux-x64.tar.gz ../../
+
+    # GitHub Release Oluştur ve Dosyayı Yükle
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
       with:
-        name: cortex-linux-x64
-        path: target/release/cortex
-        if-no-files-found: error
-        retention-days: 5
+        files: sentiric-cortex-linux-x64.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
