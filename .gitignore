@@ -1,2 +1,7 @@
-target
-assets
+/target
+/assets
+**/*.bin
+*.wav
+assets/
+target/
+*.gguf

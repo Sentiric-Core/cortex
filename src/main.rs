@@ -1,65 +1,103 @@
 /*
  * SENTIRIC CORTEX ENGINE
  * ----------------------
- * CORE LOOP v1.2 - First Words
+ * CORE LOOP v2.0 - The Awakening
  */
 
 mod audio;
 mod cognition;
+mod synthesis;
+mod intelligence; // YENİ
 
-use std::time::{Instant, Duration};
+use std::time::Duration;
 use std::thread;
 use crate::audio::Ear;
 use crate::cognition::Brain;
+use crate::synthesis::Mouth;
+use crate::intelligence::Mind;
 
 struct EngineState {
     is_running: bool,
     ticks: u64,
 }
 
+fn calculate_rms(samples: &[f32]) -> f32 {
+    let sum_squares: f32 = samples.iter().map(|&x| x * x).sum();
+    (sum_squares / samples.len() as f32).sqrt()
+}
+
+fn sanitize_output(text: &str) -> Option<String> {
+    let raw = text.replace("[BLANK_AUDIO]", ""); 
+    let raw = raw.trim();
+    if raw.is_empty() { return None; }
+    if raw.starts_with('(') || raw.starts_with('[') { return None; }
+    if raw.len() < 2 { return None; }
+    Some(raw.to_string())
+}
+
 fn main() -> anyhow::Result<()> {
     println!("-------------------------------------------");
-    println!("SENTIRIC CORTEX ENGINE: NEURAL LINK");
+    println!("SENTIRIC CORTEX ENGINE: LOADING CORES...");
     println!("-------------------------------------------");
 
     let mut state = EngineState { is_running: true, ticks: 0 };
-
-    // 1. Modülleri Başlat
+    
+    // 1. Modüller
     let ear = Ear::new()?;
     let brain = Brain::new()?;
+    let mind = Mind::new()?; // YENİ: Llama Yükleniyor (Biraz sürebilir)
+    let mouth = Mouth::new()?;
 
-    // Ses Tamponu (Buffer): Kesintisiz konuşmayı biriktirmek için
-    // Whisper'a parça parça göndermek yerine, 3 saniyelik bloklar halinde göndereceğiz.
     let mut audio_buffer: Vec<f32> = Vec::new();
-    let flush_threshold = 16000 * 3; // 3 saniye (16kHz)
+    let flush_threshold = 16000 * 3; 
+    let silence_threshold = 0.020;    
 
-    println!("[SYSTEM] Motor hazır. Konuşun... (Her 3 saniyede bir analiz edilir)");
+    println!("-------------------------------------------");
+    println!("SYSTEM ONLINE. NEURAL NETWORKS READY.");
+    println!("-------------------------------------------");
+    
+    mouth.speak("Sentiric core online.");
+    ear.clear_buffer();
 
     while state.is_running {
         state.ticks += 1;
         
-        // --- 1. SENSE (İşitme) ---
+        // SENSE
         if let Some(packet) = ear.listen() {
             audio_buffer.extend_from_slice(&packet.samples);
         }
 
-        // --- 2. PERCEIVE (Algılama Döngüsü) ---
-        // Şimdilik basit mantık: Buffer dolunca Whisper'a gönder.
-        // İleride buraya "Sessizlik Algılandığında Gönder" (VAD) eklenecek.
+        // PERCEIVE
         if audio_buffer.len() >= flush_threshold {
-            println!("[THINK] Ses işleniyor ({} samples)...", audio_buffer.len());
-            
-            // Transkripsiyon (Bloklayan işlem - Main thread durur)
-            // DOOM Notu: İleride bu işlem async task olacak.
-            if let Some(text) = brain.transcribe(&audio_buffer) {
-                println!("\n>> DUYULAN: \"{}\"\n", text.trim());
-            }
+            let loudness = calculate_rms(&audio_buffer);
 
-            // Buffer'ı temizle
+            if loudness > silence_threshold {
+                print!("[INPUT] (RMS: {:.4}) İşleniyor... ", loudness);
+                
+                if let Some(input_text) = brain.transcribe(&audio_buffer) {
+                    if let Some(clean_input) = sanitize_output(&input_text) {
+                        println!("\n>> KULLANICI: \"{}\"", clean_input);
+                        
+                        // THINK (Echo yerine Intelligence)
+                        if let Some(response) = mind.think(&clean_input) {
+                            println!(">> SENTIRIC:  \"{}\"", response);
+                            
+                            // ACT
+                            mouth.speak(&response);
+                            
+                            // REFLEXIVE DEAFNESS
+                            ear.clear_buffer();
+                            println!("[SYSTEM] Tampon temizlendi.");
+                        }
+
+                    } else {
+                        println!("(Gürültü filtrelendi)");
+                    }
+                }
+            }
             audio_buffer.clear();
         }
 
-        // CPU Koruma
         thread::sleep(Duration::from_millis(5));
     }
 
