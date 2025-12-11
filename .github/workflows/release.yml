@@ -10,28 +10,34 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  build-linux:
+    name: Build Linux (Ubuntu)
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    # 1. Kodları Çek (v4'e güncellendi)
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
+    # 2. Sistem Bağımlılıklarını Kur (Linux için ses ve derleme araçları)
     - name: Install System Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libasound2-dev libclang-dev cmake
+        sudo apt-get install -y libasound2-dev libclang-dev cmake pkg-config build-essential
 
+    # 3. Rust Kurulumu (Modern 'dtolnay' action'ı kullanıldı)
     - name: Set up Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
+      uses: dtolnay/rust-toolchain@stable
 
+    # 4. Derleme İşlemi
     - name: Build Cortex (Release)
       run: cargo build --release --verbose
 
+    # 5. Dosyayı Yükle (v4'e güncellendi - KRİTİK DÜZELTME)
     - name: Upload Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: cortex-linux-x64
         path: target/release/cortex
+        if-no-files-found: error
+        retention-days: 5
