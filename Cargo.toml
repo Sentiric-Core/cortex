@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Düşük seviye ses giriş/çıkış kütüphanesi
-cpal = "0.15"
+cpal = "0.15"       # Ses Girişi
+whisper-rs = "0.13" # Yapay Zeka (STT) - C++ Binding
+rubato = "0.14"     # Resampler (44.1kHz -> 16kHz)
+anyhow = "1.0"      # Hata Yönetimi

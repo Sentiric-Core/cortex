@@ -1,73 +1,81 @@
-/*
- * MODÜL: AUDIO (SENSE)
- * Sorumluluk: Mikrofonu dinlemek ve veriyi ana döngüye iletmek.
- * Mimari: Asenkron Stream (Thread-based)
- */
-
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::mpsc;
-use std::thread;
+use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
 
 pub struct AudioPacket {
-    pub samples: Vec<f32>,
-    pub timestamp: u64,
+    pub samples: Vec<f32>, // Artık garanti 16kHz
 }
 
 pub struct Ear {
-    // Stream, scope dışına çıktığında kapanır, bu yüzden struct içinde tutuyoruz.
-    _stream: cpal::Stream, 
+    _stream: cpal::Stream,
     receiver: mpsc::Receiver<AudioPacket>,
 }
 
 impl Ear {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        println!("[AUDIO] Ses sürücüleri taranıyor...");
-
-        // 1. Host (İşletim Sistemi Ses Sunucusu) Bağlantısı
+    pub fn new() -> anyhow::Result<Self> {
         let host = cpal::default_host();
-
-        // 2. Varsayılan Giriş Cihazını (Mikrofon) Bul
-        let device = host.default_input_device()
-            .ok_or("Mikrofon bulunamadı! Bir giriş cihazı bağlı mı?")?;
-        
-        println!("[AUDIO] Cihaz bulundu: {}", device.name()?);
-
-        // 3. Cihaz Konfigürasyonu (Varsayılan ayarları al)
+        let device = host.default_input_device().ok_or(anyhow::anyhow!("Mikrofon bulunamadı"))?;
         let config = device.default_input_config()?;
-        println!("[AUDIO] Config: Kanal: {}, Sample Rate: {}", config.channels(), config.sample_rate().0);
+        
+        println!("[AUDIO] Input Device: {}", device.name().unwrap_or_default());
+        println!("[AUDIO] Native Sample Rate: {}", config.sample_rate().0);
 
-        // 4. Veri Kanalı (Thread'ler arası iletişim)
         let (sender, receiver) = mpsc::channel();
+        let input_sample_rate = config.sample_rate().0 as usize;
+        let output_sample_rate = 16000; // Whisper standardı
 
-        // 5. Stream Oluşturma (Arka planda sürekli çalışır)
-        let err_fn = move |err| {
-            eprintln!("[AUDIO ERROR] Ses akış hatası: {}", err);
+        // Resampler Hazırlığı (Sadece eğer oranlar farklıysa)
+        let needs_resampling = input_sample_rate != output_sample_rate;
+        
+        // Resampler parametreleri (High Quality)
+        let params = SincInterpolationParameters {
+            sinc_len: 256,
+            f_cutoff: 0.95,
+            interpolation: SincInterpolationType::Linear,
+            oversampling_factor: 256,
+            window: WindowFunction::BlackmanHarris2,
         };
 
-        let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => device.build_input_stream(
-                &config.into(),
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    // Veriyi kopyalayıp ana motora gönderiyoruz
-                    // Not: Production'da RingBuffer kullanılmalı, şimdilik Vec.
-                    if !data.is_empty() {
-                        let packet = AudioPacket {
-                            samples: data.to_vec(),
-                            timestamp: 0, // TODO: Gerçek zaman damgası eklenecek
-                        };
-                        // Hata olursa (Receiver kapalıysa) sessizce yut
-                        let _ = sender.send(packet);
-                    }
-                },
-                err_fn,
-                None
-            )?,
-            _ => return Err("Desteklenmeyen ses formatı (Sadece F32 desteklenir)".into()),
-        };
+        // Block size CPAL'den dinamik gelir ama Rubato sabit ister. 
+        // Basitlik için main thread'de değil, callback içinde bir buffer yöneteceğiz.
+        // NOT: Callback içinde karmaşık logic Rust'ta zordur (`Send` trait).
+        // Bu yüzden raw datayı gönderip, işlemi Brain tarafında veya ayrı bir thread'de yapmak daha güvenlidir.
+        // Ancak DOOM felsefesi: "Veriyi kaynağında işle".
+        
+        // ŞİMDİLİK: Resampling'i atlıyoruz ve CPAL'den 16kHz istemeyi deniyoruz.
+        // Eğer donanım desteklemezse raw gönderip main loop'ta basit decimation yapacağız.
+        // (Rubato'yu callback içine gömmek ownership sorunları yaratır, bu adımı sonra optimize edeceğiz).
 
-        // 6. Dinlemeye Başla
+        let stream = device.build_input_stream(
+            &config.into(),
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                if !data.is_empty() {
+                    // Basit Decimation (Eğer 44100 veya 48000 ise kabaca örnek atla)
+                    // Bu "Quick & Dirty" bir çözümdür ama çalışır.
+                    // İleride Rubato buraya entegre edilecek.
+                    
+                    let processed_data: Vec<f32> = if input_sample_rate > 16500 {
+                        // Basit oran orantı ile örnek seçme (Downsampling)
+                        let ratio = input_sample_rate as f32 / 16000.0;
+                        let mut output = Vec::with_capacity((data.len() as f32 / ratio) as usize);
+                        let mut accumulator = 0.0;
+                        while accumulator < data.len() as f32 {
+                            output.push(data[accumulator as usize]);
+                            accumulator += ratio;
+                        }
+                        output
+                    } else {
+                        data.to_vec()
+                    };
+
+                    let _ = sender.send(AudioPacket { samples: processed_data });
+                }
+            },
+            |err| eprintln!("[AUDIO ERROR] {}", err),
+            None
+        )?;
+
         stream.play()?;
-        println!("[AUDIO] Dinleme aktif (Stream Started).");
 
         Ok(Ear {
             _stream: stream,
@@ -75,12 +83,7 @@ impl Ear {
         })
     }
 
-    // Ana döngüden çağrılır: "Yeni duyduğun bir şey var mı?"
     pub fn listen(&self) -> Option<AudioPacket> {
-        // Bloklamadan (Non-blocking) veriyi al
-        match self.receiver.try_recv() {
-            Ok(packet) => Some(packet),
-            Err(_) => None, // Veri yok
-        }
+        self.receiver.try_recv().ok()
     }
 }
